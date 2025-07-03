@@ -373,13 +373,13 @@
 
             <!-- Seção de CNPJs do Banco -->
             <div class="section">
-                <h2><span class="section-icon">🏦</span>CNPJs do Banco da Empresa</h2>
+                <h2><span class="section-icon">🏦</span>CNPJs/CPFs do Banco da Empresa</h2>
                 <div class="textarea-container">
-                    <label for="bankCnpjList">Cole aqui os CNPJs do campo A1_CGC da tabela SA1010:</label>
-                    <textarea id="bankCnpjList" placeholder="Cole os CNPJs aqui, um por linha ou separados por vírgula...&#10;&#10;Exemplo:&#10;12345678000123&#10;98765432000145&#10;11223344000156"></textarea>
+                    <label for="bankCnpjList">Cole aqui os CNPJs/CPFs do campo A1_CGC da tabela SA1010:</label>
+                    <textarea id="bankCnpjList" placeholder="Cole os CNPJs/CPFs aqui, um por linha ou separados por vírgula...&#10;&#10;Exemplos aceitos:&#10;12345678000123 (CNPJ completo)&#10;12345678000 (CNPJ incompleto - será completado com zeros)&#10;12345678901 (CPF)&#10;05461387802 (CPF ou CNPJ incompleto)"></textarea>
                 </div>
                 <button class="btn" onclick="processCnpjList()">
-                    <span>📋</span> Processar Lista de CNPJs
+                    <span>📋</span> Processar Lista de CNPJs/CPFs
                 </button>
             </div>
 
@@ -433,25 +433,47 @@
         let matchedData = [];
         let uploadedFiles = [];
 
-        // Função para normalizar CNPJ (remove pontuação)
+        // Função para normalizar CNPJ/CPF (remove pontuação e completa com zeros à esquerda)
         function normalizeCnpj(cnpj) {
             if (!cnpj) return '';
-            return cnpj.toString().replace(/[^\d]/g, '');
+            const normalized = cnpj.toString().replace(/[^\d]/g, '');
+            
+            // Se tem 11 dígitos, é CPF - manter como está
+            if (normalized.length === 11) {
+                return normalized;
+            }
+            
+            // Se tem menos de 14 dígitos, completar com zeros à esquerda para CNPJ
+            if (normalized.length > 0 && normalized.length < 14) {
+                return normalized.padStart(14, '0');
+            }
+            
+            return normalized;
         }
 
-        // Função para formatar CNPJ
+        // Função para formatar CNPJ/CPF
         function formatCnpj(cnpj) {
             const normalized = normalizeCnpj(cnpj);
+            
+            // Formatação para CPF (11 dígitos)
+            if (normalized.length === 11) {
+                return normalized.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+            }
+            
+            // Formatação para CNPJ (14 dígitos)
             if (normalized.length === 14) {
                 return normalized.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
             }
+            
             return cnpj;
         }
 
-        // Função para validar CNPJ
+        // Função para validar CNPJ/CPF
         function isValidCnpj(cnpj) {
             const normalized = normalizeCnpj(cnpj);
-            return normalized.length === 14 && /^\d{14}$/.test(normalized);
+            // Aceitar CPFs (11 dígitos) ou CNPJs (14 dígitos) ou números que possam ser completados
+            return normalized.length === 11 || normalized.length === 14 || 
+                   (normalized.length > 0 && normalized.length <= 14 && /^\d+$/.test(normalized));
         }
 
         // Event listener para upload de arquivos
@@ -584,22 +606,46 @@
             }
 
             bancoData = [];
+            let totalProcessados = 0;
+            let totalValidos = 0;
+            let totalInvalidos = 0;
             
             // Dividir por quebras de linha e vírgulas
             const cnpjList = text.split(/[\n,;]+/).map(cnpj => cnpj.trim()).filter(cnpj => cnpj);
             
             cnpjList.forEach(cnpj => {
+                totalProcessados++;
                 const normalizedCnpj = normalizeCnpj(cnpj);
+                
                 if (isValidCnpj(normalizedCnpj)) {
                     bancoData.push({
                         cnpjOriginal: cnpj,
                         cnpjNormalizado: normalizedCnpj
                     });
+                    totalValidos++;
+                } else {
+                    totalInvalidos++;
+                    console.warn('CNPJ/CPF inválido ignorado:', cnpj);
                 }
             });
 
-            showSuccess(`✅ Lista do banco processada: ${bancoData.length} CNPJs válidos encontrados.`);
+            let message = `✅ Lista do banco processada:\n`;
+            message += `📊 Total processados: ${totalProcessados}\n`;
+            message += `✅ CNPJs/CPFs válidos: ${totalValidos}\n`;
+            
+            if (totalInvalidos > 0) {
+                message += `❌ Inválidos ignorados: ${totalInvalidos}`;
+            }
+            
+            showSuccess(message);
             console.log('Dados do banco processados:', bancoData.length);
+            
+            // Log de alguns exemplos para debug
+            console.log('Exemplos de CNPJs/CPFs processados:');
+            bancoData.slice(0, 5).forEach((item, index) => {
+                const tipo = item.cnpjNormalizado.length === 11 ? 'CPF' : 'CNPJ';
+                console.log(`${index + 1}. ${item.cnpjOriginal} → ${item.cnpjNormalizado} (${tipo})`);
+            });
         }
 
         // Função para comparar e gerar relatório
@@ -667,18 +713,20 @@
                     <thead>
                         <tr>
                             <th>#</th>
-                            <th>CNPJ Formatado</th>
-                            <th>CNPJ Sem Pontuação</th>
+                            <th>CNPJ/CPF Formatado</th>
+                            <th>CNPJ/CPF Sem Pontuação</th>
                             <th>Nome/Razão Social</th>
                             <th>Município</th>
                             <th>Estado</th>
                             <th>Arquivo</th>
+                            <th>Tipo</th>
                         </tr>
                     </thead>
                     <tbody>
             `;
 
             matchedData.forEach((item, index) => {
+                const tipo = item.cnpjNormalizado.length === 11 ? 'CPF' : 'CNPJ';
                 tableHTML += `
                     <tr>
                         <td>${index + 1}</td>
@@ -688,6 +736,7 @@
                         <td>${item.municipio}</td>
                         <td>${item.estado}</td>
                         <td>${item.arquivo}</td>
+                        <td><span style="background: ${tipo === 'CPF' ? '#e8f5e8' : '#f0f8ff'}; padding: 2px 8px; border-radius: 4px; font-size: 0.9em;">${tipo}</span></td>
                     </tr>
                 `;
             });
@@ -710,10 +759,11 @@
             try {
                 // Preparar dados para o Excel
                 const worksheetData = [
-                    ['#', 'CNPJ Formatado', 'CNPJ Sem Pontuação', 'Nome/Razão Social', 'Município', 'Estado', 'Arquivo']
+                    ['#', 'CNPJ/CPF Formatado', 'CNPJ/CPF Sem Pontuação', 'Nome/Razão Social', 'Município', 'Estado', 'Arquivo', 'Tipo']
                 ];
 
                 matchedData.forEach((item, index) => {
+                    const tipo = item.cnpjNormalizado.length === 11 ? 'CPF' : 'CNPJ';
                     worksheetData.push([
                         index + 1,
                         formatCnpj(item.cnpjNormalizado),
@@ -721,7 +771,8 @@
                         item.nome,
                         item.municipio,
                         item.estado,
-                        item.arquivo
+                        item.arquivo,
+                        tipo
                     ]);
                 });
 
@@ -745,12 +796,13 @@
                 // Ajustar largura das colunas
                 ws1['!cols'] = [
                     { width: 5 },   // #
-                    { width: 20 },  // CNPJ Formatado
-                    { width: 18 },  // CNPJ Sem Pontuação
+                    { width: 20 },  // CNPJ/CPF Formatado
+                    { width: 18 },  // CNPJ/CPF Sem Pontuação
                     { width: 40 },  // Nome
                     { width: 20 },  // Município
                     { width: 8 },   // Estado
-                    { width: 25 }   // Arquivo
+                    { width: 25 },  // Arquivo
+                    { width: 8 }    // Tipo
                 ];
                 
                 XLSX.utils.book_append_sheet(wb, ws1, 'CNPJs Comuns');
